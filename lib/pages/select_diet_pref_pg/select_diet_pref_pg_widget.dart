@@ -12,7 +12,6 @@ import 'package:provider/provider.dart';
 import 'select_diet_pref_pg_model.dart';
 export 'select_diet_pref_pg_model.dart';
 
-/// Landing Page: Select Diet Preference
 class SelectDietPrefPgWidget extends StatefulWidget {
   const SelectDietPrefPgWidget({Key? key}) : super(key: key);
 
@@ -32,50 +31,67 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
     super.initState();
     _model = createModel(context, () => SelectDietPrefPgModel());
 
-    // On page load, check if the user already has any MyMealsRecord.
-    // If not, copy ALL of `meals3` directly into MyMealsRecord (array fields only).
+    // Initialize switch values from FFAppState if not already set by the model
+    // The model itself might initialize them from FFAppState, good to ensure consistency.
+    _model.vegSwitchValue ??= FFAppState().userPrefVeg;
+    _model.eggSwitchValue ??= FFAppState().userPrefEgg;
+    _model.nonVegSwitchValue ??= FFAppState().userPrefNonVeg;
+
     SchedulerBinding.instance.addPostFrameCallback((_) async {
-      // 1) Fetch ONE MyMealsRecord for the current user (if any exist).
+      // Check if the user already has any MyMealsRecord.
+      // If not, copy ALL of `meals3` directly into MyMealsRecord.
       _model.myMealsFetch = await queryMyMealsRecordOnce(
         parent: currentUserReference,
-        singleRecord: true,
+        singleRecord: true, // We only need to know if at least one exists
       ).then((list) => list.firstOrNull);
 
-      // 2) If no MyMealsRecord exists yet, do the “full copy” of meals3 → MyMealsRecord.
+      if (!mounted) return;
+
       if (_model.myMealsFetch == null) {
-        // Fetch the entire 'meals3' collection 
+        // User has no meals, so populate from meals3 master list
         final allMeals3Snapshot =
             await FirebaseFirestore.instance.collection('meals3').get();
 
+        if (!mounted) return;
+
+        WriteBatch batch = FirebaseFirestore.instance.batch();
+
         for (final doc in allMeals3Snapshot.docs) {
-          final data = doc.data() as Map<String, dynamic>;
+          final data = doc.data(); // Data is already Map<String, dynamic>
 
-          // Extract each List<String> (or default to empty list if missing):
           final List<String> categoryList =
-              (data['category'] as List<dynamic>? ?? []).cast<String>();
+              List<String>.from(data['category'] as List<dynamic>? ?? []);
           final List<String> dietList =
-              (data['dietType'] as List<dynamic>? ?? []).cast<String>();
+              List<String>.from(data['dietType'] as List<dynamic>? ?? []);
           final List<String> tagsList =
-              (data['tags'] as List<dynamic>? ?? []).cast<String>();
+              List<String>.from(data['tags'] as List<dynamic>? ?? []);
           final List<String> relatedList =
-              (data['related'] as List<dynamic>? ?? []).cast<String>();
+              List<String>.from(data['related'] as List<dynamic>? ?? []);
           final List<String> foodTypeList =
-              (data['foodType'] as List<dynamic>? ?? []).cast<String>();
+              List<String>.from(data['foodType'] as List<dynamic>? ?? []);
 
-          // Now create a new MyMealsRecord under the current user.
-          // We pass all fields 
-          await MyMealsRecord.createDoc(currentUserReference!).set(
+          // Create a new MyMealsRecord under the current user
+          // Note: MyMealsRecord.createDoc is not standard FlutterFlow for subcollections.
+          // We use parent.collection('myMeals').doc() directly.
+          final newMealDocRef =
+              currentUserReference!.collection('myMeals').doc();
+
+          batch.set(
+            newMealDocRef,
             createMyMealsRecordData(
               mealName: data['mealName'] as String? ?? '',
-              createdBy: data['createdby'] as String? ?? '',
+              createdBy: data['createdby'] as String? ??
+                  'system', // Mark as system-copied initially
               tags: tagsList,
               related: relatedList,
               foodType: foodTypeList,
               dietType: dietList,
-              isSelected: false,
+              category: categoryList, // ensure this is copied correctly
+              isSelected: false, // Default to not selected
             ),
           );
         }
+        await batch.commit();
       }
     });
   }
@@ -88,11 +104,11 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
 
   @override
   Widget build(BuildContext context) {
-    context.watch<FFAppState>();
+    context.watch<
+        FFAppState>(); // To react to FFAppState changes if any are made directly
 
     return GestureDetector(
       onTap: () {
-        // Dismiss keyboard on tap outside
         FocusScope.of(context).unfocus();
         FocusManager.instance.primaryFocus?.unfocus();
       },
@@ -108,19 +124,18 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
               'Select Your Preference',
               style: FlutterFlowTheme.of(context).headlineLarge.override(
                 font: GoogleFonts.interTight(
-                  fontWeight:
-                      FlutterFlowTheme.of(context).headlineLarge.fontWeight,
-                  fontStyle:
-                      FlutterFlowTheme.of(context).headlineLarge.fontStyle,
+                  // Using GoogleFonts directly for clarity
+                  fontWeight: FontWeight.w600, // Example weight
+                  fontStyle: FontStyle.normal, // Example style
                 ),
                 color: Colors.white,
+                fontSize: 26, // Explicit font size
                 letterSpacing: 0.0,
-                fontWeight:
-                    FlutterFlowTheme.of(context).headlineLarge.fontWeight,
-                fontStyle: FlutterFlowTheme.of(context).headlineLarge.fontStyle,
                 shadows: [
                   Shadow(
-                    color: FlutterFlowTheme.of(context).secondaryText,
+                    color: FlutterFlowTheme.of(context)
+                        .secondaryText
+                        .withOpacity(0.5),
                     offset: const Offset(1.0, 1.0),
                     blurRadius: 1.0,
                   )
@@ -128,7 +143,7 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
               ),
             ),
           ),
-          centerTitle: false,
+          centerTitle: true, // Changed to true for better centering
           elevation: 2.0,
         ),
         body: SafeArea(
@@ -138,7 +153,6 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
             child: Column(
               mainAxisSize: MainAxisSize.max,
               children: [
-                // Veg Switch
                 Divider(
                   thickness: 2.0,
                   color: FlutterFlowTheme.of(context).alternate,
@@ -146,36 +160,25 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
                 Material(
                   color: Colors.transparent,
                   child: SwitchListTile.adaptive(
-                    value: _model.vegSwitchValue ??= FFAppState().userPrefVeg,
+                    value: _model.vegSwitchValue ??= FFAppState()
+                        .userPrefVeg, // Ensure model value is primary
                     onChanged: (newValue) async {
-                      safeSetState(() => _model.vegSwitchValue = newValue);
-                      FFAppState().userPrefVeg = newValue;
-                      safeSetState(() {});
+                      setState(() => _model.vegSwitchValue = newValue);
+                      // No need to update FFAppState here, will do it on "Continue"
                     },
                     title: Text(
                       'Veg',
                       style:
                           FlutterFlowTheme.of(context).headlineSmall.override(
                                 font: GoogleFonts.interTight(
-                                  fontWeight: FlutterFlowTheme.of(context)
-                                      .headlineSmall
-                                      .fontWeight,
-                                  fontStyle: FlutterFlowTheme.of(context)
-                                      .headlineSmall
-                                      .fontStyle,
-                                ),
+                                    fontWeight: FontWeight.w600),
                                 fontSize: 30.0,
                                 letterSpacing: 0.0,
-                                fontWeight: FlutterFlowTheme.of(context)
-                                    .headlineSmall
-                                    .fontWeight,
-                                fontStyle: FlutterFlowTheme.of(context)
-                                    .headlineSmall
-                                    .fontStyle,
                               ),
                     ),
                     tileColor: FlutterFlowTheme.of(context).secondaryBackground,
-                    activeColor: FlutterFlowTheme.of(context).alternate,
+                    activeColor: FlutterFlowTheme.of(context)
+                        .alternate, // This is the switch color when "on"
                     activeTrackColor: FlutterFlowTheme.of(context).primary,
                     dense: false,
                     controlAffinity: ListTileControlAffinity.trailing,
@@ -184,8 +187,6 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
                     ),
                   ),
                 ),
-
-                // Egg Switch
                 Divider(
                   thickness: 2.0,
                   color: FlutterFlowTheme.of(context).alternate,
@@ -195,30 +196,16 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
                   child: SwitchListTile.adaptive(
                     value: _model.eggSwitchValue ??= FFAppState().userPrefEgg,
                     onChanged: (newValue) async {
-                      safeSetState(() => _model.eggSwitchValue = newValue);
-                      FFAppState().userPrefEgg = newValue;
-                      safeSetState(() {});
+                      setState(() => _model.eggSwitchValue = newValue);
                     },
                     title: Text(
                       'Egg',
                       style:
                           FlutterFlowTheme.of(context).headlineSmall.override(
                                 font: GoogleFonts.interTight(
-                                  fontWeight: FlutterFlowTheme.of(context)
-                                      .headlineSmall
-                                      .fontWeight,
-                                  fontStyle: FlutterFlowTheme.of(context)
-                                      .headlineSmall
-                                      .fontStyle,
-                                ),
+                                    fontWeight: FontWeight.w600),
                                 fontSize: 30.0,
                                 letterSpacing: 0.0,
-                                fontWeight: FlutterFlowTheme.of(context)
-                                    .headlineSmall
-                                    .fontWeight,
-                                fontStyle: FlutterFlowTheme.of(context)
-                                    .headlineSmall
-                                    .fontStyle,
                               ),
                     ),
                     tileColor: FlutterFlowTheme.of(context).secondaryBackground,
@@ -228,8 +215,6 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
                     controlAffinity: ListTileControlAffinity.trailing,
                   ),
                 ),
-
-                // Non‐Veg Switch
                 Divider(
                   thickness: 2.0,
                   color: FlutterFlowTheme.of(context).alternate,
@@ -240,30 +225,16 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
                     value: _model.nonVegSwitchValue ??=
                         FFAppState().userPrefNonVeg,
                     onChanged: (newValue) async {
-                      safeSetState(() => _model.nonVegSwitchValue = newValue);
-                      FFAppState().userPrefNonVeg = newValue;
-                      safeSetState(() {});
+                      setState(() => _model.nonVegSwitchValue = newValue);
                     },
                     title: Text(
                       'Non-Veg',
                       style:
                           FlutterFlowTheme.of(context).headlineSmall.override(
                                 font: GoogleFonts.interTight(
-                                  fontWeight: FlutterFlowTheme.of(context)
-                                      .headlineSmall
-                                      .fontWeight,
-                                  fontStyle: FlutterFlowTheme.of(context)
-                                      .headlineSmall
-                                      .fontStyle,
-                                ),
+                                    fontWeight: FontWeight.w600),
                                 fontSize: 30.0,
                                 letterSpacing: 0.0,
-                                fontWeight: FlutterFlowTheme.of(context)
-                                    .headlineSmall
-                                    .fontWeight,
-                                fontStyle: FlutterFlowTheme.of(context)
-                                    .headlineSmall
-                                    .fontStyle,
                               ),
                     ),
                     tileColor: FlutterFlowTheme.of(context).secondaryBackground,
@@ -273,13 +244,10 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
                     controlAffinity: ListTileControlAffinity.trailing,
                   ),
                 ),
-
                 Divider(
                   thickness: 2.0,
                   color: FlutterFlowTheme.of(context).alternate,
                 ),
-
-                // Continue Button (save preferences and navigate)
                 Padding(
                   padding:
                       const EdgeInsetsDirectional.fromSTEB(0.0, 50.0, 0.0, 0.0),
@@ -289,70 +257,93 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
                       singleRecord: true,
                     ),
                     builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
-                        return Center(
-                          child: SizedBox(
-                            width: 50.0,
-                            height: 50.0,
-                            child: CircularProgressIndicator(
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                FlutterFlowTheme.of(context).primary,
-                              ),
-                            ),
-                          ),
-                        );
-                      }
-                      List<MyDietPrefRecord> buttonMyDietPrefRecordList =
-                          snapshot.data!;
-                      final buttonMyDietPrefRecord =
-                          buttonMyDietPrefRecordList.isNotEmpty
-                              ? buttonMyDietPrefRecordList.first
-                              : null;
+                      // This stream is mainly to check if a record exists for update vs create
+                      // The actual values for saving come from _model.xxxSwitchValue
+                      final buttonMyDietPrefRecord = snapshot.data?.firstOrNull;
 
                       return FFButtonWidget(
                         onPressed: () async {
-                          // 1) Write or update MyDietPrefRecord with the three toggles
+                          // NEW: Validation - at least one preference must be selected
+                          final bool isVegSelected =
+                              _model.vegSwitchValue ?? false;
+                          final bool isEggSelected =
+                              _model.eggSwitchValue ?? false;
+                          final bool isNonVegSelected =
+                              _model.nonVegSwitchValue ?? false;
+
+                          if (!isVegSelected &&
+                              !isEggSelected &&
+                              !isNonVegSelected) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                    'Please select at least one diet preference to continue.'),
+                                backgroundColor: Colors.redAccent,
+                              ),
+                            );
+                            return; // Stop processing
+                          }
+
+                          // Update FFAppState with the current model values
+                          FFAppState().userPrefVeg = isVegSelected;
+                          FFAppState().userPrefEgg = isEggSelected;
+                          FFAppState().userPrefNonVeg = isNonVegSelected;
+
+                          // Save/Update MyDietPrefRecord in Firestore
                           if (buttonMyDietPrefRecord != null) {
                             await buttonMyDietPrefRecord.reference
                                 .update(createMyDietPrefRecordData(
-                              veg: _model.vegSwitchValue,
-                              nonVeg: _model.nonVegSwitchValue,
-                              egg: _model.eggSwitchValue,
+                              veg: isVegSelected,
+                              nonVeg: isNonVegSelected,
+                              egg: isEggSelected,
                             ));
                           } else {
-                            await MyDietPrefRecord.createDoc(
-                                    currentUserReference!)
+                            // MyDietPrefRecord.createDoc is not standard FlutterFlow for subcollections.
+                            // Use parent.collection('myDietPref').doc()
+                            await currentUserReference!
+                                .collection('myDietPref')
+                                .doc()
                                 .set(createMyDietPrefRecordData(
-                              veg: _model.vegSwitchValue,
-                              nonVeg: _model.nonVegSwitchValue,
-                              egg: _model.eggSwitchValue,
-                            ));
+                                  veg: isVegSelected,
+                                  nonVeg: isNonVegSelected,
+                                  egg: isEggSelected,
+                                ));
                           }
 
-                          FFAppState().userPrefVeg = _model.vegSwitchValue!;
-                          FFAppState().userPrefNonVeg =
-                              _model.nonVegSwitchValue!;
-                          FFAppState().userPrefEgg = _model.eggSwitchValue!;
-
-                          // 2) Ensure a SelectedMealsListRecord exists
+                          // Ensure a SelectedMealsListRecord exists
                           _model.selectedMealsFetch =
                               await querySelectedMealsListRecordOnce(
                             parent: currentUserReference,
                             singleRecord: true,
                           ).then((s) => s.firstOrNull);
+
                           if (_model.selectedMealsFetch == null) {
-                            await SelectedMealsListRecord.createDoc(
-                                    currentUserReference!)
-                                .set(createSelectedMealsListRecordData());
+                            // SelectedMealsListRecord.createDoc is not standard.
+                            // Use parent.collection(...).doc()
+                            await currentUserReference!
+                                .collection('selectedMealsList')
+                                .doc()
+                                .set(createSelectedMealsListRecordData(
+                                    mealsList: [])); // Initialize with empty list
                           }
 
-                          // 3) Navigate to MealSelectionPg
-                          context.pushNamed(MealSelectionPgWidget.routeName);
+                          // NEW: Set the initial setup completion flag
+                          FFAppState().hasCompletedInitialSetup = true;
 
-                          safeSetState(() {});
+                          if (context.mounted) {
+                            context.pushNamed(MealSelectionPgWidget.routeName);
+                          }
+
+                          // setState is called by FFAppState if it notifies listeners,
+                          // or by createModel if it updates. If not, and UI depends on local model state
+                          // that isn't driven by FFAppState for this view, you might need it.
+                          // For this page, direct navigation happens, so immediate rebuild might not be critical.
+                          // safeSetState(() {}); // Usually not needed if FFAppState handles UI updates or navigation occurs
                         },
                         text: 'Continue',
                         options: FFButtonOptions(
+                          width:
+                              200, // Added a fixed width for better appearance
                           height: 58.9,
                           padding: const EdgeInsetsDirectional.fromSTEB(
                               16.0, 0.0, 16.0, 0.0),
@@ -363,26 +354,16 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
                               .headlineLarge
                               .override(
                             font: GoogleFonts.interTight(
-                              fontWeight: FlutterFlowTheme.of(context)
-                                  .headlineLarge
-                                  .fontWeight,
-                              fontStyle: FlutterFlowTheme.of(context)
-                                  .headlineLarge
-                                  .fontStyle,
-                            ),
+                                fontWeight: FontWeight.w600),
                             color: FlutterFlowTheme.of(context)
                                 .secondaryBackground,
+                            fontSize: 22, // Adjusted font size for button
                             letterSpacing: 0.0,
-                            fontWeight: FlutterFlowTheme.of(context)
-                                .headlineLarge
-                                .fontWeight,
-                            fontStyle: FlutterFlowTheme.of(context)
-                                .headlineLarge
-                                .fontStyle,
                             shadows: [
                               Shadow(
-                                color:
-                                    FlutterFlowTheme.of(context).secondaryText,
+                                color: FlutterFlowTheme.of(context)
+                                    .secondaryText
+                                    .withOpacity(0.5),
                                 offset: const Offset(1.0, 1.0),
                                 blurRadius: 1.0,
                               )

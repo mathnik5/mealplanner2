@@ -8,5 +8,3 @@ export '/pages/meal_selection_pg/meal_selection_pg_widget.dart'
     show MealSelectionPgWidget;
 export '/pages/weekly_planner_pg/weekly_planner_pg_widget.dart'
     show WeeklyPlannerPgWidget;
-export '/test3/test3_widget.dart' show Test3Widget;
-export '/test4/test4_widget.dart' show Test4Widget;

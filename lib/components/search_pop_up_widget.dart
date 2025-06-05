@@ -1,23 +1,30 @@
+import 'dart:async';
+import 'package:collection/collection.dart';
+import '/backend/schema/util/schema_util.dart';
+import '/backend/schema/index.dart';
+import '/flutter_flow/flutter_flow_util.dart';
 import '/auth/firebase_auth/auth_util.dart';
 import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_animations.dart';
 import '/flutter_flow/flutter_flow_button_tabbar.dart';
-// import '/flutter_flow/flutter_flow_choice_chips.dart'; // Not used in current logic, can be re-added if needed
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
-import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
-// import '/flutter_flow/form_field_controller.dart'; // Not used by ChoiceChips if removed
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'search_pop_up_model.dart';
 export 'search_pop_up_model.dart';
 
 class SearchPopUpWidget extends StatefulWidget {
-  const SearchPopUpWidget({super.key});
+  final List<String>?
+      initiallySelectedMealNames; // To pre-select meals when opened from planner
+
+  const SearchPopUpWidget({
+    super.key,
+    this.initiallySelectedMealNames,
+  });
 
   @override
   State<SearchPopUpWidget> createState() => _SearchPopUpWidgetState();
@@ -27,18 +34,23 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
     with TickerProviderStateMixin {
   late SearchPopUpModel _model;
 
-  // Map category→List of selected meal names for this popup session
-  final Map<String, List<String>> _selectedByCategory = {
-    'Breakfast': [],
-    'Lunch': [],
-    'Snacks': [],
-    'Dinner': [],
-  };
+  // Map category (tab name) -> List of selected meal names for this popup session
+  final Map<String, List<String>> _selectedByCategory = {};
 
-  // Category names in the same order as the tabs
+  // Category names in the same order as the tabs - NOW 4 TABS
   final List<String> _categories = ['Breakfast', 'Lunch', 'Snacks', 'Dinner'];
+  // Optional: if display labels differ from keys
+  // final Map<String, String> _categoryDisplayLabels = {
+  //   'Breakfast': 'Breakfast',
+  //   'Lunch': 'Lunch',
+  //   'Snacks': 'Snacks',
+  //   'Dinner': 'Dinner',
+  // };
 
   final animationsMap = <String, AnimationInfo>{};
+
+  // To store the globally selected meals (isSelected == true) fetched once
+  List<MyMealsRecord> _globallySelectedMeals = [];
 
   @override
   void setState(VoidCallback callback) {
@@ -54,20 +66,24 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
     _model.textController1 ??= TextEditingController();
     _model.textFieldFocusNode ??= FocusNode();
 
+    // Initialize _selectedByCategory for all popup categories
+    for (var cat in _categories) {
+      _selectedByCategory[cat] = [];
+    }
+
     _model.tabBarController = TabController(
       vsync: this,
-      length: _categories.length,
+      length: _categories.length, // 4 tabs
       initialIndex: 0,
     )..addListener(() {
-        setState(() {
-          // _currentTabIndex is not explicitly used but good to keep if needed later
-          // _currentTabIndex = _model.tabBarController?.index ?? 0;
-        });
+        if (mounted) {
+          setState(() {
+            // UI might need to rebuild based on tab index if content visibility changes
+          });
+        }
       });
 
-    _model.textFieldBFTextController ??= TextEditingController();
-    _model.textFieldBFFocusNode ??= FocusNode();
-
+    // Animations setup (remains the same)
     animationsMap.addAll({
       'containerOnPageLoadAnimation1': AnimationInfo(
         trigger: AnimationTrigger.onPageLoad,
@@ -111,59 +127,85 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
     );
   }
 
+  void _initializeSelections(List<MyMealsRecord> allGloballySelectedMeals) {
+    if (widget.initiallySelectedMealNames != null &&
+        widget.initiallySelectedMealNames!.isNotEmpty) {
+      for (String mealName in widget.initiallySelectedMealNames!) {
+        final mealRecord = allGloballySelectedMeals
+            .firstWhereOrNull((meal) => meal.mealName == mealName);
+
+        if (mealRecord != null) {
+          // Determine which pop-up category this meal belongs to.
+          // A meal might belong to multiple (e.g., Lunch and Dinner).
+          // For simplicity, add to first matching tab. Or handle more complex logic if needed.
+          for (String tabCategory in _categories) {
+            if (mealRecord.category.contains(tabCategory)) {
+              if (!_selectedByCategory[tabCategory]!.contains(mealName)) {
+                _selectedByCategory[tabCategory]!.add(mealName);
+              }
+              // If a meal can be in "Lunch" and "Dinner" categories,
+              // and we have separate tabs, it should be pre-selected in both if applicable.
+            } else if (tabCategory == "Lunch" &&
+                mealRecord.category.contains("LunchDinner")) {
+              if (!_selectedByCategory[tabCategory]!.contains(mealName)) {
+                _selectedByCategory[tabCategory]!.add(mealName);
+              }
+            } else if (tabCategory == "Dinner" &&
+                mealRecord.category.contains("LunchDinner")) {
+              if (!_selectedByCategory[tabCategory]!.contains(mealName)) {
+                _selectedByCategory[tabCategory]!.add(mealName);
+              }
+            }
+          }
+        }
+      }
+      // Ensure UI reflects these initial selections
+      if (mounted) {
+        setState(() {});
+      }
+    }
+  }
+
   @override
   void dispose() {
-    _model.maybeDispose();
+    _model.maybeDispose(); // Disposes controllers managed by the model
     super.dispose();
   }
 
-  /// Helper function to determine if a meal passes the current diet preferences
   bool _passesDietFilter(MyMealsRecord meal) {
     final wantVeg = FFAppState().userPrefVeg;
     final wantEgg = FFAppState().userPrefEgg;
     final wantNonVeg = FFAppState().userPrefNonVeg;
 
-    // If no preferences are set by the user, show all meals (or consider this case based on requirements)
-    if (!wantVeg && !wantEgg && !wantNonVeg) {
-      return true; // Or false, depending on desired behavior when no prefs are set
-    }
+    if (!wantVeg && !wantEgg && !wantNonVeg) return true;
 
-    final mealDietTypes = meal.dietType; // This is List<String>
-
-    // If the meal has no diet tags, show it (fail-safe or per requirement)
-    if (mealDietTypes.isEmpty) {
-      return true;
-    }
+    final mealDietTypes = meal.dietType;
+    if (mealDietTypes.isEmpty) return true;
 
     bool passes = false;
     if (wantVeg && mealDietTypes.contains('Veg')) passes = true;
     if (wantEgg && mealDietTypes.contains('Egg')) passes = true;
     if (wantNonVeg && mealDietTypes.contains('NonVeg')) passes = true;
-
     return passes;
   }
 
-  /// Filters a list of meals based on category, diet preferences, and search text.
-  List<MyMealsRecord> _getFilteredMealsForTab(
-      List<MyMealsRecord> allMeals, String categoryName) {
-    String searchText = _model.textController1.text.toLowerCase().trim();
+  List<MyMealsRecord> _getFilteredMealsForTabDisplay(
+      List<MyMealsRecord> globallySelectedMeals, String tabCategoryName) {
+    String searchText = _model.textController1?.text.toLowerCase().trim() ?? "";
 
-    return allMeals.where((meal) {
-      // Filter by category
-      bool categoryMatch = false;
-      if (categoryName == 'Lunch' || categoryName == 'Dinner') {
-        // For a combined "Lunch/Dinner" tab, or if they are separate tabs:
-        categoryMatch =
-            meal.category.contains('Lunch') || meal.category.contains('Dinner');
-      } else {
-        categoryMatch = meal.category.contains(categoryName);
-      }
+    return globallySelectedMeals.where((meal) {
+      // 1. Filter by Tab's Category
+      bool categoryMatch = meal.category.contains(tabCategoryName);
+      // Special handling for combined categories if MyMealsRecord still uses them
+      // For pop-up, "Lunch" tab shows "Lunch" meals, "Dinner" tab shows "Dinner" meals.
+      // If a meal is in MyMealsRecord category: ['Lunch', 'Dinner'], it could appear in both.
+
       if (!categoryMatch) return false;
 
-      // Filter by diet
+      // 2. Filter by diet (already applied to globallySelectedMeals, but good for safety)
       if (!_passesDietFilter(meal)) return false;
 
-      // Filter by search text (if any)
+      // 3. Filter by search text
       if (searchText.isNotEmpty) {
         if (!meal.mealName.toLowerCase().contains(searchText)) {
           return false;
@@ -173,26 +215,28 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
     }).toList();
   }
 
-  /// Builds a single tappable “pill” for a MyMealsRecord
-  Widget _buildMealCard(MyMealsRecord mealRecord, String categoryKey) {
-    final alreadyAdded =
-        _selectedByCategory[categoryKey]!.contains(mealRecord.mealName);
+  Widget _buildMealCard(MyMealsRecord mealRecord, String currentTabCategory) {
+    // Check if selected for the *current pop-up session* under this tab
+    final bool isSelectedInPopup = _selectedByCategory[currentTabCategory]
+            ?.contains(mealRecord.mealName) ??
+        false;
 
     return Padding(
       padding: const EdgeInsetsDirectional.fromSTEB(5.0, 5.0, 5.0, 5.0),
       child: InkWell(
         splashColor: Colors.transparent,
-        focusColor: Colors.transparent,
-        hoverColor: Colors.transparent,
-        highlightColor: Colors.transparent,
         onTap: () {
-          setState(() {
-            if (alreadyAdded) {
-              _selectedByCategory[categoryKey]!.remove(mealRecord.mealName);
-            } else {
-              _selectedByCategory[categoryKey]!.add(mealRecord.mealName);
-            }
-          });
+          if (mounted) {
+            setState(() {
+              if (isSelectedInPopup) {
+                _selectedByCategory[currentTabCategory]
+                    ?.remove(mealRecord.mealName);
+              } else {
+                _selectedByCategory[currentTabCategory]
+                    ?.add(mealRecord.mealName);
+              }
+            });
+          }
         },
         child: Material(
           color: Colors.transparent,
@@ -202,9 +246,10 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
           ),
           child: Container(
             decoration: BoxDecoration(
-              color: alreadyAdded
-                  ? const Color(0xFF4CEBD9) // Theme primary or accent
-                  : const Color(0xFFE0E3E7), // Theme light grey
+              color: isSelectedInPopup
+                  ? FlutterFlowTheme.of(context)
+                      .secondary // A distinct selection color for pop-up
+                  : FlutterFlowTheme.of(context).alternate,
               boxShadow: const [
                 BoxShadow(
                   blurRadius: 4.0,
@@ -213,22 +258,17 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                 )
               ],
               borderRadius: BorderRadius.circular(7.0),
-              shape: BoxShape.rectangle,
             ),
             child: Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(
-                  8.0, 4.0, 8.0, 4.0), // Adjusted padding
+              padding: const EdgeInsetsDirectional.fromSTEB(8.0, 4.0, 8.0, 4.0),
               child: Text(
                 mealRecord.mealName,
                 style: FlutterFlowTheme.of(context).bodyMedium.override(
-                      fontFamily: FlutterFlowTheme.of(context)
-                          .bodyMedium
-                          .fontFamily, // Ensuring font family is applied
-                      letterSpacing: 0.0,
-                      color: alreadyAdded // Ensuring text color contrast
-                          ? FlutterFlowTheme.of(context)
-                              .primaryText // Or white if background is dark
+                      fontFamily: FlutterFlowTheme.of(context).bodyMediumFamily,
+                      color: isSelectedInPopup
+                          ? Colors.white // Text color for selected items
                           : FlutterFlowTheme.of(context).primaryText,
+                      letterSpacing: 0.0,
                     ),
               ),
             ),
@@ -238,220 +278,228 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
     );
   }
 
-  /// Builds the content for a generic meal tab.
-  Widget _buildMealTab(List<MyMealsRecord> allUserMeals, String categoryName) {
-    final filteredMeals = _getFilteredMealsForTab(allUserMeals, categoryName);
+  List<String> _buildAllowedDietOptionsForNewMeal() {
+    final opts = <String>[];
+    if (FFAppState().userPrefVeg) opts.add('Veg');
+    if (FFAppState().userPrefEgg) opts.add('Egg');
+    if (FFAppState().userPrefNonVeg) opts.add('NonVeg');
+    return opts;
+  }
+
+  Widget _buildAddNewPill(String tabCategoryName, String foodTypeName,
+      List<MyMealsRecord> allUserMealsForDuplicationCheck) {
+    // This state should ideally be managed in the model if it needs to persist across rebuilds
+    // For simplicity here, using a local state variable managed by StatefulWidget if this were a sub-widget.
+    // Since it's part of the main widget, we can use a map in _SearchPopUpWidgetState or in _model
+    // Let's assume we add a simple local state management for the "isAdding" state per foodType
+    // For robust state, use the model's dynamic controllers.
+
+    // For managing the specific "add new" input text for this category/foodType
+    final TextEditingController currentTextController =
+        _model.getAddNewMealTextController(tabCategoryName, foodTypeName);
+    final FocusNode currentFocusNode =
+        _model.getAddNewMealFocusNode(tabCategoryName, foodTypeName);
+
+    // Local state for diet choice for this specific add new instance
+    // This needs to be managed more robustly if many "add new" sections are open.
+    // For now, we'll assume only one "add new" section is "active" for input at a time,
+    // or we'd need a map for these diet choices too.
+    // String _currentNewMealDietChoice = _buildAllowedDietOptionsForNewMeal().firstOrNull ?? '';
+
+    return Row(
+      mainAxisSize: MainAxisSize.min, // To keep row compact
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 8.0, 0.0),
+            child: TextFormField(
+              controller: currentTextController,
+              focusNode: currentFocusNode,
+              autofocus: false, // Set to true if you want immediate focus
+              obscureText: false,
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Add to $foodTypeName',
+                hintStyle: FlutterFlowTheme.of(context).labelMedium,
+                enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(
+                    color: FlutterFlowTheme.of(context).alternate,
+                    width: 1.0,
+                  ),
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(
+                    color: FlutterFlowTheme.of(context).primary,
+                    width: 1.0,
+                  ),
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
+                filled: true,
+                fillColor: FlutterFlowTheme.of(context).secondaryBackground,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              ),
+              style: FlutterFlowTheme.of(context).bodyMedium,
+            ),
+          ),
+        ),
+        FlutterFlowIconButton(
+          borderColor: Colors.transparent,
+          borderRadius: 20.0,
+          borderWidth: 1.0,
+          buttonSize: 40.0,
+          fillColor: FlutterFlowTheme.of(context).primary,
+          icon: const Icon(
+            Icons.add,
+            color: Colors.white,
+            size: 20.0,
+          ),
+          onPressed: () async {
+            final newMealName = currentTextController.text.trim();
+            if (newMealName.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text('Please enter a meal name.'),
+                  backgroundColor: FlutterFlowTheme.of(context).error,
+                ),
+              );
+              return;
+            }
+
+            // Duplication Check: Against all meals in MyMealsRecord for the current tab's category
+            final duplicate = allUserMealsForDuplicationCheck.any((meal) =>
+                meal.mealName.toLowerCase() == newMealName.toLowerCase() &&
+                meal.category.contains(tabCategoryName));
+
+            if (duplicate) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content:
+                      Text('$newMealName already exists in $tabCategoryName.'),
+                  backgroundColor: FlutterFlowTheme.of(context).error,
+                ),
+              );
+              return;
+            }
+
+            List<String> newMealDietTypes =
+                _buildAllowedDietOptionsForNewMeal();
+            // If multiple diet options available, user should pick one.
+            // For simplicity, if multiple are allowed by user preference, assign all.
+            // Or, add a small dropdown here if necessary. (As per MealSelectionPg, dropdown appears if >1 option)
+            // Here, let's assume the user's general prefs apply.
+
+            final newMealRef =
+                currentUserReference!.collection('myMeals').doc();
+            await newMealRef.set(createMyMealsRecordData(
+              mealName: newMealName,
+              category: [tabCategoryName],
+              foodType: [foodTypeName], // From subheading
+              dietType: newMealDietTypes.isNotEmpty
+                  ? newMealDietTypes
+                  : [], // Assign based on user's active prefs
+              isSelected:
+                  true, // New meals added from planner pop-up are considered selected
+              createdBy: 'user',
+              tags: [],
+              related: [],
+            ));
+
+            currentTextController.clear();
+            if (mounted) {
+              setState(() {
+                // Add to current pop-up selection
+                _selectedByCategory[tabCategoryName]?.add(newMealName);
+                // The StreamBuilder will pick up the new meal for display.
+              });
+            }
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                    '$newMealName added to $tabCategoryName and selected.'),
+                backgroundColor: FlutterFlowTheme.of(context).success,
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMealTab(String tabCategoryName, List<MyMealsRecord> sourceMeals,
+      List<MyMealsRecord> allUserMealsForDuplicationCheck) {
+    final mealsForThisTab =
+        _getFilteredMealsForTabDisplay(sourceMeals, tabCategoryName);
+
+    // Group by foodType
+    Map<String, List<MyMealsRecord>> mealsByFoodType = {};
+    for (var meal in mealsForThisTab) {
+      if (meal.foodType.isNotEmpty) {
+        for (String ft in meal.foodType) {
+          // Iterate as foodType is List<String>
+          mealsByFoodType.putIfAbsent(ft, () => []).add(meal);
+        }
+      } else {
+        mealsByFoodType
+            .putIfAbsent('Other', () => [])
+            .add(meal); // Default group
+      }
+    }
+    final sortedFoodTypes = mealsByFoodType.keys.toList()..sort();
 
     return SingleChildScrollView(
+      key: PageStorageKey<String>(tabCategoryName), // Preserve scroll position
+      padding: const EdgeInsets.all(8.0),
       child: Column(
         mainAxisSize: MainAxisSize.max,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Divider(
-            height: 1.0,
-            thickness: 1.0,
-            color: FlutterFlowTheme.of(context).alternate,
-          ),
-          if (filteredMeals.isEmpty && _model.textController1.text.isNotEmpty)
+          if (mealsForThisTab.isEmpty &&
+              (_model.textController1?.text.isNotEmpty ?? false))
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Center(
-                  child: Text(
-                      'No meals found matching your search in "$categoryName".',
-                      style: FlutterFlowTheme.of(context).bodyMedium)),
+                child: Text(
+                    'No meals found matching your search in "$tabCategoryName".',
+                    style: FlutterFlowTheme.of(context).bodyMedium),
+              ),
             )
-          else if (filteredMeals.isEmpty)
+          else if (mealsForThisTab.isEmpty)
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Center(
                   child: Text(
-                'No meals available for "$categoryName" with current diet preferences.',
+                'No meals available for "$tabCategoryName" that match your selections and diet preferences.',
                 style: FlutterFlowTheme.of(context).bodyMedium,
                 textAlign: TextAlign.center,
               )),
             ),
-          // Wrap of meal items
-          Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(5.0, 5.0, 0.0, 0.0),
-            child: Wrap(
-              spacing: 0.0,
-              runSpacing: 0.0,
-              alignment: WrapAlignment.start,
-              crossAxisAlignment: WrapCrossAlignment.start,
-              direction: Axis.horizontal,
-              runAlignment: WrapAlignment.start,
-              verticalDirection: VerticalDirection.down,
-              clipBehavior: Clip.none,
-              children: List.generate(filteredMeals.length, (index) {
-                return _buildMealCard(filteredMeals[index], categoryName);
-              }),
+          for (String foodTypeName in sortedFoodTypes) ...[
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
+              child: Text(
+                foodTypeName,
+                style: FlutterFlowTheme.of(context).titleMedium,
+              ),
             ),
-          ),
-
-          // "Add new Meal Item" text field + arrow
-          Padding(
-            padding: const EdgeInsets.symmetric(
-                vertical: 8.0), // Added padding around the Add New section
-            child: Row(
-              mainAxisSize: MainAxisSize.max,
-              children: [
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsetsDirectional.fromSTEB(
-                        15.0, 10.0, 8.0, 10.0), // Adjusted padding
-                    child: SizedBox(
-                      // width: 200.0, // Width is managed by Expanded
-                      child: TextFormField(
-                        controller: categoryName == 'Breakfast'
-                            ? _model
-                                .textFieldBFTextController // Use specific controller for BF or a generic one
-                            : TextEditingController(), // Temporary, manage controllers better if many tabs
-                        focusNode: categoryName == 'Breakfast'
-                            ? _model.textFieldBFFocusNode
-                            : FocusNode(),
-                        autofocus: false,
-                        obscureText: false,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          labelStyle:
-                              FlutterFlowTheme.of(context).labelMedium.override(
-                                    fontFamily: FlutterFlowTheme.of(context)
-                                        .labelMedium
-                                        .fontFamily,
-                                    letterSpacing: 0.0,
-                                  ),
-                          hintText: 'Add new meal to $categoryName',
-                          hintStyle:
-                              FlutterFlowTheme.of(context).labelMedium.override(
-                                    fontFamily: FlutterFlowTheme.of(context)
-                                        .labelMedium
-                                        .fontFamily,
-                                    letterSpacing: 0.0,
-                                  ),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: const BorderSide(
-                              color: Color(0xFF716666),
-                              width: 1.0,
-                            ),
-                            borderRadius: BorderRadius.circular(8.0),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              // Use theme primary color for focused border
-                              color: FlutterFlowTheme.of(context).primary,
-                              width: 1.0,
-                            ),
-                            borderRadius: BorderRadius.circular(8.0),
-                          ),
-                          errorBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: FlutterFlowTheme.of(context).error,
-                              width: 1.0,
-                            ),
-                            borderRadius: BorderRadius.circular(8.0),
-                          ),
-                          focusedErrorBorder: OutlineInputBorder(
-                            borderSide: BorderSide(
-                              color: FlutterFlowTheme.of(context).error,
-                              width: 1.0,
-                            ),
-                            borderRadius: BorderRadius.circular(8.0),
-                          ),
-                          filled: true,
-                          fillColor:
-                              FlutterFlowTheme.of(context).secondaryBackground,
-                        ),
-                        style: FlutterFlowTheme.of(context).bodyMedium.override(
-                              fontFamily: FlutterFlowTheme.of(context)
-                                  .bodyMedium
-                                  .fontFamily,
-                              letterSpacing: 0.0,
-                            ),
-                        cursorColor: FlutterFlowTheme.of(context).primaryText,
-                        // validator: _model.textFieldBFTextControllerValidator.asValidator(context), // Add validator if needed
-                      ),
-                    ),
-                  ),
-                ),
-                Padding(
-                  // Consistent padding for the button
-                  padding:
-                      const EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 15.0, 0.0),
-                  child: IconButton(
-                    icon: Icon(
-                      Icons
-                          .add_circle_outline, // Changed to a more common add icon
-                      color: FlutterFlowTheme.of(context).primaryText,
-                      size: 30.0,
-                    ),
-                    onPressed: () async {
-                      final newMealName = (categoryName == 'Breakfast'
-                              ? _model.textFieldBFTextController.text
-                              : (ModalRoute.of(context)?.settings.arguments
-                                          as TextEditingController?)
-                                      ?.text ??
-                                  "" // This part needs robust controller handling if scaling
-                          )
-                          .trim();
-
-                      if (newMealName.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Please enter a meal name.'),
-                            backgroundColor: FlutterFlowTheme.of(context).error,
-                          ),
-                        );
-                        return;
-                      }
-
-                      // Determine dietType for the new meal based on FFAppState
-                      List<String> newMealDietTypes = [];
-                      if (FFAppState().userPrefVeg) newMealDietTypes.add('Veg');
-                      if (FFAppState().userPrefEgg) newMealDietTypes.add('Egg');
-                      if (FFAppState().userPrefNonVeg)
-                        newMealDietTypes.add('NonVeg');
-
-                      // FFAppState().addToSelectedMeals(newMealName); // This line seems to manage a different list. Review FFAppState().selectedMeals usage.
-
-                      await MyMealsRecord.createDoc(currentUserReference!)
-                          .set(createMyMealsRecordData(
-                        mealName: newMealName,
-                        category: [
-                          categoryName
-                        ], // Use the current tab's category
-                        dietType: newMealDietTypes,
-                        isSelected:
-                            false, // Newly added items from popup are not "globally selected" by default
-                        createdBy: 'user', // Mark as user-created
-                        tags: [], // Default empty, can be expanded later
-                        related: [], // Default empty
-                      ));
-
-                      // Clear the text field after adding
-                      if (categoryName == 'Breakfast') {
-                        _model.textFieldBFTextController?.clear();
-                      } else {
-                        // Clear other controllers if they are defined and used
-                      }
-
-                      // Optionally add to local selection for this popup session
-                      setState(() {
-                        _selectedByCategory[categoryName]!.add(newMealName);
-                      });
-
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                              '$newMealName added to $categoryName and selected.'),
-                          backgroundColor: FlutterFlowTheme.of(context).success,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
+            Wrap(
+              spacing: 8.0,
+              runSpacing: 8.0,
+              children: mealsByFoodType[foodTypeName]!
+                  .map((meal) => _buildMealCard(meal, tabCategoryName))
+                  .toList(),
             ),
-          ),
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(vertical: 12.0, horizontal: 4.0),
+              child: _buildAddNewPill(tabCategoryName, foodTypeName,
+                  allUserMealsForDuplicationCheck),
+            ),
+            const Divider(),
+          ],
         ],
       ),
     );
@@ -459,44 +507,35 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
 
   @override
   Widget build(BuildContext context) {
-    context.watch<FFAppState>(); // Ensure FFAppState is available
+    context.watch<FFAppState>();
 
     return ClipRRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(
-          sigmaX: 5.0,
-          sigmaY: 4.0,
-        ),
+        filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 4.0),
         child: StreamBuilder<List<MyMealsRecord>>(
-          // Fetch ALL MyMealsRecord for the current user. Filtering will be done client-side.
-          stream: queryMyMealsRecord(
-            parent: currentUserReference,
-            // No queryBuilder here means fetch all.
-          ),
+          stream: queryMyMealsRecord(parent: currentUserReference),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
-              return Center(
-                child: SizedBox(
-                  width: 50.0,
-                  height: 50.0,
-                  child: CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                        FlutterFlowTheme.of(context).primary),
-                  ),
-                ),
-              );
+              return const Center(child: CircularProgressIndicator());
             }
             if (snapshot.hasError) {
-              return Center(
-                  child: Text('Error fetching meals: ${snapshot.error}'));
-            }
-            if (!snapshot.hasData || snapshot.data!.isEmpty) {
-              // Handle case where user has no meals at all.
-              // You might want a different UI here, or let the tabs show "No meals available".
-              // For now, we pass an empty list to the tabs.
+              return Center(child: Text('Error: ${snapshot.error}'));
             }
 
-            final allUserMeals = snapshot.data ?? []; // Use empty list if null
+            final allUserMeals = snapshot.data ?? [];
+
+            // Filter for globally selected meals (isSelected == true) ONCE
+            // and also apply diet filter here.
+            _globallySelectedMeals = allUserMeals
+                .where((meal) => meal.isSelected && _passesDietFilter(meal))
+                .toList();
+
+            // Initialize selections after _globallySelectedMeals is fetched for the first time
+            if (widget.initiallySelectedMealNames != null &&
+                _selectedByCategory.values.every((list) => list.isEmpty)) {
+              // Only initialize if not already populated, to avoid re-initializing on every rebuild
+              _initializeSelections(_globallySelectedMeals);
+            }
 
             return Scaffold(
               backgroundColor: Colors.transparent,
@@ -509,36 +548,30 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                     child: Container(
                       width: double.infinity,
                       constraints: const BoxConstraints(maxWidth: 770.0),
-                      decoration: const BoxDecoration(),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            FlutterFlowIconButton(
-                              borderColor: Colors.transparent,
-                              borderRadius: 30.0,
-                              borderWidth: 1.0,
-                              buttonSize: 44.0,
-                              fillColor: FlutterFlowTheme.of(context).accent4,
-                              icon: Icon(
-                                Icons.close_rounded,
-                                color:
-                                    FlutterFlowTheme.of(context).secondaryText,
-                                size: 24.0,
-                              ),
-                              onPressed: () {
-                                Navigator.pop(context);
-                              },
+                      padding: const EdgeInsets.all(12.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          FlutterFlowIconButton(
+                            borderColor: Colors.transparent,
+                            borderRadius: 30.0,
+                            borderWidth: 1.0,
+                            buttonSize: 44.0,
+                            fillColor: FlutterFlowTheme.of(context).accent4,
+                            icon: Icon(
+                              Icons.close_rounded,
+                              color: FlutterFlowTheme.of(context).secondaryText,
+                              size: 24.0,
                             ),
-                          ],
-                        ),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                   Padding(
                     padding: const EdgeInsetsDirectional.fromSTEB(
-                        16.0, 2.0, 16.0, 8.0), // Added horizontal padding
+                        16.0, 2.0, 16.0, 8.0),
                     child: Container(
                       width: double.infinity,
                       constraints: const BoxConstraints(maxWidth: 770.0),
@@ -554,43 +587,32 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                         borderRadius: BorderRadius.circular(16.0),
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.all(4.0), // Reduced padding
+                        padding: const EdgeInsets.all(4.0),
                         child: SizedBox(
-                          height: 60.0, // Reduced height
+                          height: 60.0,
                           child: Center(
-                            // Center the TextFormField
                             child: TextFormField(
                               controller: _model.textController1,
                               focusNode: _model.textFieldFocusNode,
-                              autofocus: false, // Usually true for search
+                              autofocus: false,
                               obscureText: false,
                               decoration: InputDecoration(
                                 hintText: 'Search meals...',
-                                hintStyle: FlutterFlowTheme.of(context)
-                                    .labelLarge, // Adjusted style for better fit
-                                enabledBorder: InputBorder.none, // Cleaner look
-                                focusedBorder: InputBorder.none, // Cleaner look
+                                hintStyle:
+                                    FlutterFlowTheme.of(context).labelLarge,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
                                 prefixIcon: Icon(
-                                  // Added search icon
                                   Icons.search,
                                   color: FlutterFlowTheme.of(context)
                                       .secondaryText,
-                                  size: 20, // Adjusted size
+                                  size: 20,
                                 ),
-                                contentPadding:
-                                    const EdgeInsetsDirectional.fromSTEB(
-                                        // Adjusted padding
-                                        0.0,
-                                        0.0,
-                                        0.0,
-                                        0.0),
+                                contentPadding: EdgeInsets.zero,
                               ),
-                              style: FlutterFlowTheme.of(context)
-                                  .bodyLarge, // Adjusted style
+                              style: FlutterFlowTheme.of(context).bodyLarge,
                               onChanged: (_) => setState(
-                                  () {}), // Rebuild UI on search text change
-                              validator: _model.textController1Validator
-                                  .asValidator(context),
+                                  () {}), // Rebuild on search text change
                             ),
                           ),
                         ),
@@ -599,17 +621,19 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                   ),
                   Expanded(
                     child: ClipRRect(
-                      borderRadius: const BorderRadius.only(
-                        bottomLeft: Radius.circular(12.0),
-                        bottomRight: Radius.circular(12.0),
-                        topLeft: Radius.circular(12.0), // Added top radius
-                        topRight: Radius.circular(12.0), // Added top radius
-                      ),
+                      borderRadius:
+                          const BorderRadius.all(Radius.circular(12.0)),
                       child: Container(
-                        width: double.infinity,
+                        width: double.infinity, // Was double.infinity
+                        constraints: const BoxConstraints(
+                            maxWidth: 770.0), // Added to constrain width
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 16.0), // Added horizontal margin
                         decoration: BoxDecoration(
                           color:
                               FlutterFlowTheme.of(context).secondaryBackground,
+                          borderRadius: BorderRadius.circular(
+                              12.0), // ensure rounding if container is smaller
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -617,54 +641,38 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                             Align(
                               alignment: const Alignment(0.0, 0),
                               child: FlutterFlowButtonTabBar(
-                                useToggleButtonStyle:
-                                    false, // Keep as true if you prefer toggle style
+                                useToggleButtonStyle: false,
                                 isScrollable: true,
-                                labelStyle: FlutterFlowTheme.of(context)
-                                    .titleSmall
-                                    .override(
-                                        fontFamily: FlutterFlowTheme.of(context)
-                                            .titleSmall
-                                            .fontFamily),
+                                labelStyle:
+                                    FlutterFlowTheme.of(context).titleSmall,
                                 unselectedLabelStyle:
-                                    FlutterFlowTheme.of(context)
-                                        .bodyMedium
-                                        .override(
-                                            fontFamily:
-                                                FlutterFlowTheme.of(context)
-                                                    .bodyMedium
-                                                    .fontFamily),
-                                labelColor: FlutterFlowTheme.of(context)
-                                    .primaryText, // Or .primary for selected
+                                    FlutterFlowTheme.of(context).bodyMedium,
+                                labelColor:
+                                    FlutterFlowTheme.of(context).primaryText,
                                 unselectedLabelColor:
                                     FlutterFlowTheme.of(context).secondaryText,
-                                backgroundColor: // Transparent or subtle background
-                                    FlutterFlowTheme.of(context)
-                                        .secondaryBackground,
+                                backgroundColor: FlutterFlowTheme.of(context)
+                                    .secondaryBackground,
                                 unselectedBackgroundColor:
                                     FlutterFlowTheme.of(context)
                                         .secondaryBackground,
-                                borderColor: FlutterFlowTheme.of(context)
-                                    .alternate, // Or primary for selected
+                                borderColor:
+                                    FlutterFlowTheme.of(context).alternate,
                                 unselectedBorderColor:
                                     FlutterFlowTheme.of(context).alternate,
-                                borderWidth: 1.0, // Subtle border
-                                borderRadius: 8.0, // Consistent rounding
+                                borderWidth: 1.0,
+                                borderRadius: 8.0,
                                 elevation: 0.0,
                                 labelPadding:
                                     const EdgeInsetsDirectional.fromSTEB(
                                         16.0, 0.0, 16.0, 0.0),
-                                buttonMargin: // Added margin for spacing
-                                    const EdgeInsets.symmetric(
-                                        horizontal: 4.0, vertical: 8.0),
+                                buttonMargin: const EdgeInsets.symmetric(
+                                    horizontal: 4.0, vertical: 8.0),
                                 tabs: _categories
                                     .map((c) => Tab(text: c))
-                                    .toList(),
+                                    .toList(), // Use _categories for tab text
                                 controller: _model.tabBarController,
-                                onTap: (i) {
-                                  setState(
-                                      () {}); // Ensure UI rebuilds if tab changes affect filtered list
-                                },
+                                onTap: (i) => setState(() {}),
                               ),
                             ),
                             Expanded(
@@ -672,9 +680,12 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                                 controller: _model.tabBarController,
                                 children: _categories.map((categoryName) {
                                   return KeepAliveWidgetWrapper(
-                                    // Keep state of tabs
+                                    // To preserve state across tabs
                                     builder: (context) => _buildMealTab(
-                                        allUserMeals, categoryName),
+                                        categoryName,
+                                        _globallySelectedMeals, // Pass the pre-filtered list of globally selected meals
+                                        allUserMeals // Pass all user meals for duplication check reference
+                                        ),
                                   );
                                 }).toList(),
                               ),
@@ -687,113 +698,100 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                   ),
                   Container(
                     width: double.infinity,
+                    constraints: const BoxConstraints(
+                        maxWidth: 770.0), // Constrain width
+                    margin: const EdgeInsets.fromLTRB(
+                        16.0, 0, 16.0, 0), // Match horizontal margin
                     color: FlutterFlowTheme.of(context).primaryBackground,
                     padding: const EdgeInsets.symmetric(
-                        vertical: 12.0, horizontal: 16.0),
+                        vertical: 12.0,
+                        horizontal:
+                            16.0), // Horizontal padding might be redundant due to margin
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // "Suggest a random meal" button - No changes needed here for data model
-                        // FFButtonWidget(...),
-                        // const SizedBox(height: 12.0),
-
-                        Center(
-                          child: Text(
-                            'Selected Items for Planner', // Clarified title
-                            style: FlutterFlowTheme.of(context)
-                                .titleMedium
-                                .override(
-                                    fontFamily: FlutterFlowTheme.of(context)
-                                        .titleMedium
-                                        .fontFamily),
-                          ),
+                        Text(
+                          'Selected for Planner Slot',
+                          style: FlutterFlowTheme.of(context).titleMedium,
                         ),
                         const SizedBox(height: 8.0),
-                        // Display selected items
-                        ..._categories.map((cat) {
+                        // Display selected items from _selectedByCategory
+                        ..._categories.expand((cat) {
+                          // Iterate through pop-up categories
                           final items = _selectedByCategory[cat]!;
-                          if (items.isEmpty) return const SizedBox.shrink();
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 2.0), // Reduced padding
-                            child: Center(
-                              // Center the text
+                          if (items.isEmpty) return [const SizedBox.shrink()];
+                          return [
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 2.0),
                               child: RichText(
                                 textAlign: TextAlign.center,
                                 text: TextSpan(
                                   children: [
                                     TextSpan(
-                                        text: '$cat: ',
-                                        style: FlutterFlowTheme.of(context)
-                                            .bodyMedium
-                                            .override(
-                                                fontFamily:
-                                                    FlutterFlowTheme.of(context)
-                                                        .bodyMedium
-                                                        .fontFamily,
-                                                fontWeight: FontWeight.bold,
-                                                color: FlutterFlowTheme.of(
-                                                        context)
-                                                    .primaryText // Ensure text color
-                                                )),
+                                      text: '$cat: ',
+                                      style: FlutterFlowTheme.of(context)
+                                          .bodyMedium
+                                          .override(
+                                            fontFamily:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodyMediumFamily,
+                                            fontWeight: FontWeight.bold,
+                                            color: FlutterFlowTheme.of(context)
+                                                .primaryText,
+                                          ),
+                                    ),
                                     TextSpan(
                                       text: items.join(', '),
                                       style: FlutterFlowTheme.of(context)
                                           .bodyMedium
                                           .override(
-                                              fontFamily:
-                                                  FlutterFlowTheme.of(context)
-                                                      .bodyMedium
-                                                      .fontFamily,
-                                              color: FlutterFlowTheme.of(
-                                                      context)
-                                                  .secondaryText // Ensure text color
-                                              ),
+                                            fontFamily:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodyMediumFamily,
+                                            color: FlutterFlowTheme.of(context)
+                                                .secondaryText,
+                                          ),
                                     ),
                                   ],
                                 ),
                               ),
                             ),
-                          );
+                          ];
                         }).toList(),
                         if (_selectedByCategory.values
                             .every((list) => list.isEmpty))
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 8.0),
                             child: Text(
-                              'No items selected yet.',
+                              'No items selected for this slot yet.',
                               style: FlutterFlowTheme.of(context).bodySmall,
                               textAlign: TextAlign.center,
                             ),
                           ),
-
                         const SizedBox(height: 12.0),
                         FFButtonWidget(
                           onPressed: () {
-                            final allSelectedNames = _categories
+                            final List<String> allSelectedNamesForSlot = _categories
                                 .expand((cat) => _selectedByCategory[cat]!)
-                                .toSet() // Use toSet to avoid duplicates if a meal name could be in multiple selected lists
+                                .toSet() // Ensure uniqueness if a meal name could appear under multiple selection categories
                                 .toList();
-                            Navigator.pop(context, allSelectedNames);
+                            Navigator.pop(context, allSelectedNamesForSlot);
                           },
                           text: 'OK',
                           options: FFButtonOptions(
-                            width: double.infinity, // Make button full width
-                            height: 48.0, // Standard height
-                            color: FlutterFlowTheme.of(context)
-                                .primary, // Use theme primary color
+                            width: double.infinity,
+                            height: 48.0,
+                            color: FlutterFlowTheme.of(context).primary,
                             textStyle: FlutterFlowTheme.of(context)
                                 .titleSmall
                                 .override(
                                   fontFamily: FlutterFlowTheme.of(context)
-                                      .titleSmall
-                                      .fontFamily,
-                                  color: Colors
-                                      .white, // Ensure text is white on primary color
+                                      .titleSmallFamily,
+                                  color: Colors.white,
                                 ),
-                            elevation: 2.0, // Subtle elevation
-                            borderRadius: BorderRadius.circular(
-                                8.0), // Consistent rounding
+                            elevation: 2.0,
+                            borderRadius: BorderRadius.circular(8.0),
                           ),
                         ),
                       ],
