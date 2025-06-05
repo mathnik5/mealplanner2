@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "578703647409",
+    "project_id": "mealmaster-qilqg",
+    "storage_bucket": "mealmaster-qilqg.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:578703647409:android:009272486bd141de9cb890",
+        "android_client_info": {
+          "package_name": "com.nikhil.mealplanner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDGNOlq4GS3EpB_mP8207HsNTGphA_t9Gg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

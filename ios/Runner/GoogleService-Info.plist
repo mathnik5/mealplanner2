@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>API_KEY</key>
+	<string>AIzaSyBmLaL44LOp44JAnFriCrIBQmqp2XA-48o</string>
+	<key>GCM_SENDER_ID</key>
+	<string>578703647409</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.nikhil.mealplanner</string>
+	<key>PROJECT_ID</key>
+	<string>mealmaster-qilqg</string>
+	<key>STORAGE_BUCKET</key>
+	<string>mealmaster-qilqg.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:578703647409:ios:f0ad664bd254d7f69cb890</string>
+</dict>
+</plist>
