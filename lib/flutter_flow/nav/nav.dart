@@ -746,7 +746,7 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
           actions: [
             // Example: Add a profile button
             IconButton(
-              icon: Icon(Icons.person, color: Colors.white),
+              icon: const Icon(Icons.person, color: Colors.white),
               onPressed: () {
                 context.pushNamed(ProfilePgWidget.routeName);
               },

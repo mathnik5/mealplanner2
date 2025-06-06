@@ -758,7 +758,7 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                               ),
                             ),
                           ];
-                        }).toList(),
+                        }),
                         if (_selectedByCategory.values
                             .every((list) => list.isEmpty))
                           Padding(

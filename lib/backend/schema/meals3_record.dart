@@ -12,9 +12,9 @@ import '/flutter_flow/flutter_flow_util.dart'; // For .withoutNulls in createmea
 
 class meals3Record extends FirestoreRecord {
   meals3Record._(
-    DocumentReference reference,
-    Map<String, dynamic> data,
-  ) : super(reference, data) {
+    super.reference,
+    super.data,
+  ) {
     // Passes reference and data to FirestoreRecord base
     _initializeFields();
   }

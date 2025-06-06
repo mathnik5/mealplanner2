@@ -127,8 +127,9 @@ class _MealSelectionPgWidgetState extends State<MealSelectionPgWidget>
     final wantEgg = FFAppState().userPrefEgg;
     final wantNonVeg = FFAppState().userPrefNonVeg;
 
-    if (!wantVeg && !wantEgg && !wantNonVeg)
+    if (!wantVeg && !wantEgg && !wantNonVeg) {
       return true; // Show if no user prefs
+    }
 
     final docDiet = m.dietType;
     if (docDiet.isEmpty) return true;
@@ -377,9 +378,9 @@ class _MealSelectionPgWidgetState extends State<MealSelectionPgWidget>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (categoryMeals.isEmpty)
-              Center(
+              const Center(
                   child: Padding(
-                padding: const EdgeInsets.all(16.0),
+                padding: EdgeInsets.all(16.0),
                 child: Text(
                   "No meals found for this category that match your diet preferences.",
                   textAlign: TextAlign.center,
@@ -406,8 +407,7 @@ class _MealSelectionPgWidgetState extends State<MealSelectionPgWidget>
                               .toLowerCase()
                               .compareTo(b.mealName.toLowerCase());
                         }))
-                      .map((m) => _buildMealPill(m))
-                      .toList(),
+                      .map((m) => _buildMealPill(m)),
                   _buildAddNewPill(categoryKey, ft,
                       categoryMeals), // Pass categoryMeals for duplication check
                 ],
