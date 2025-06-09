@@ -44,7 +44,7 @@ Future<void> main() async {
 
     // Helper function to safely convert a field to a List<String>
     // This is the updated part of the code.
-    List<String> _safelyConvertToList(dynamic fieldData) {
+    List<String> safelyConvertToList(dynamic fieldData) {
       if (fieldData == null) {
         return [];
       }
@@ -75,7 +75,7 @@ Future<void> main() async {
           final fieldValue = data[fieldName];
           // We check if the field is a String, which is the incorrect type we want to fix.
           if (fieldValue is String) {
-            updates[fieldName] = _safelyConvertToList(fieldValue);
+            updates[fieldName] = safelyConvertToList(fieldValue);
           }
         }
       }

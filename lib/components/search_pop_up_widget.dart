@@ -1,7 +1,4 @@
-import 'dart:async';
 import 'package:collection/collection.dart';
-import '/backend/schema/util/schema_util.dart';
-import '/backend/schema/index.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/auth/firebase_auth/auth_util.dart';
 import '/backend/backend.dart';
@@ -33,20 +30,13 @@ class SearchPopUpWidget extends StatefulWidget {
 class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
     with TickerProviderStateMixin {
   late SearchPopUpModel _model;
+  late TabController _tabController;
 
   // Map category (tab name) -> List of selected meal names for this popup session
   final Map<String, List<String>> _selectedByCategory = {};
 
   // Category names in the same order as the tabs - NOW 4 TABS
   final List<String> _categories = ['Breakfast', 'Lunch', 'Snacks', 'Dinner'];
-  // Optional: if display labels differ from keys
-  // final Map<String, String> _categoryDisplayLabels = {
-  //   'Breakfast': 'Breakfast',
-  //   'Lunch': 'Lunch',
-  //   'Snacks': 'Snacks',
-  //   'Dinner': 'Dinner',
-  // };
-
   final animationsMap = <String, AnimationInfo>{};
 
   // To store the globally selected meals (isSelected == true) fetched once
@@ -71,19 +61,25 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
       _selectedByCategory[cat] = [];
     }
 
-    _model.tabBarController = TabController(
+    _tabController = TabController(
       vsync: this,
-      length: _categories.length, // 4 tabs
+      length: _categories.length,
       initialIndex: 0,
     )..addListener(() {
-        if (mounted) {
-          setState(() {
-            // UI might need to rebuild based on tab index if content visibility changes
-          });
+        if (_tabController.indexIsChanging) {
+          // If it is, unfocus the main search bar to prevent errors
+          _model.textFieldFocusNode?.unfocus();
+
+          if (mounted) {
+            setState(() {
+              // This listener is sufficient for rebuilding UI on tab change
+            });
+          }
         }
       });
+    // Assign it to the model as well, if other parts of the FF code rely on it.
+    _model.tabBarController = _tabController;
 
-    // Animations setup (remains the same)
     animationsMap.addAll({
       'containerOnPageLoadAnimation1': AnimationInfo(
         trigger: AnimationTrigger.onPageLoad,
@@ -168,6 +164,7 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
 
   @override
   void dispose() {
+    _tabController.dispose();
     _model.maybeDispose(); // Disposes controllers managed by the model
     super.dispose();
   }
@@ -671,13 +668,13 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                                 tabs: _categories
                                     .map((c) => Tab(text: c))
                                     .toList(), // Use _categories for tab text
-                                controller: _model.tabBarController,
+                                controller: _tabController,
                                 onTap: (i) => setState(() {}),
                               ),
                             ),
                             Expanded(
                               child: TabBarView(
-                                controller: _model.tabBarController,
+                                controller: _tabController,
                                 children: _categories.map((categoryName) {
                                   return KeepAliveWidgetWrapper(
                                     // To preserve state across tabs

@@ -493,7 +493,8 @@ class _FlutterFlowButtonTabBarState extends State<FlutterFlowButtonTabBar>
       _controller!.removeListener(_handleTabControllerTick);
     }
     _controller = null;
-    // We don't own the _controller Animation, so it's not disposed here.
+    _scrollController?.dispose();
+    _animationController.dispose();
     super.dispose();
   }
 

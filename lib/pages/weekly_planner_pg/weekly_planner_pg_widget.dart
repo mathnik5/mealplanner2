@@ -2,18 +2,15 @@ import '/index.dart';
 import '/components/search_pop_up_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import '/flutter_flow/custom_functions.dart' as functions;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import '/auth/firebase_auth/auth_util.dart'; // For currentUserReference, currentUserUid
-import '/backend/backend.dart'; // For Firestore query functions if any were used directly (not in this version)
-// import '/flutter_flow/custom_functions.dart' as functions; // Not used in this version
-import 'package:cloud_firestore/cloud_firestore.dart'; // For Firestore direct access
-import 'package:intl/intl.dart'; // For DateFormat
-import 'weekly_planner_pg_model.dart';
+import '/auth/firebase_auth/auth_util.dart';
+import '/backend/backend.dart';
+import 'package:intl/intl.dart'; // Added this import
+import 'package:cloud_firestore/cloud_firestore.dart'; // Added this import
 
 export 'weekly_planner_pg_model.dart';
 
@@ -34,6 +31,7 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
   final List<String> mealTypes = ['Breakfast', 'Lunch', 'Snacks', 'Dinner'];
   late List<Map<String, List<String>>> selectedMeals;
   bool _isLoading = true;
+  DateTime? todaysDate; // Added local state for today's date
 
   @override
   void initState() {
@@ -44,34 +42,34 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
       return {for (var meal in mealTypes) meal: <String>[]};
     });
 
-    // Ensure FFAppState().todaysDate is set.
-    // The original logic might be specific to FlutterFlow's state management nuances.
-    // If FFAppState().todaysDate can be guaranteed to be set before this page,
-    // some parts of this could be simplified.
+    // Initialize today's date immediately
+    todaysDate = DateTime.now();
+
+    // Set FFAppState if it exists
     SchedulerBinding.instance.addPostFrameCallback((_) async {
-      // This sequence of setting to null, then to now, might be to force updates
-      // in some FlutterFlow contexts. Or, it ensures 'todaysDate' always reflects the actual 'today'
-      // when this page is loaded.
-      if (mounted) {
-        FFAppState().todaysDate = null;
-        // safeSetState is part of FF_util, calling setState on this widget if mounted
-        safeSetState(() {});
-        FFAppState().todaysDate = getCurrentTimestamp;
-        safeSetState(() {});
+      try {
+        FFAppState().todaysDate = DateTime.now();
+        if (mounted) {
+          safeSetState(() {});
+        }
+      } catch (e) {
+        print("FFAppState not available: $e");
       }
-      _loadWeeklyPlan(); // Load plan after today's date is confirmed/set
+      await _loadWeeklyPlan();
     });
   }
 
   Future<void> _loadWeeklyPlan() async {
-    if (currentUserReference == null) {
+    // Check if user is authenticated
+    if (currentUserUid.isEmpty) {
+      print("User not authenticated");
       if (mounted) {
         setState(() => _isLoading = false);
       }
       return;
     }
 
-    final DateTime startDate = FFAppState().todaysDate ?? DateTime.now();
+    final DateTime startDate = todaysDate ?? DateTime.now();
     List<Map<String, List<String>>> loadedPlanData =
         List.generate(7, (_) => {for (var meal in mealTypes) meal: <String>[]});
 
@@ -79,6 +77,7 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
       for (int i = 0; i < 7; i++) {
         final dayDate = startDate.add(Duration(days: i));
         final dateString = DateFormat('yyyy-MM-dd').format(dayDate);
+
         final planDocSnapshot = await FirebaseFirestore.instance
             .collection('users')
             .doc(currentUserUid)
@@ -89,15 +88,26 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
         if (planDocSnapshot.exists) {
           final data = planDocSnapshot.data() as Map<String, dynamic>;
           for (String mealTypeKey in mealTypes) {
-            // Firestore field names are typically lowercase, e.g., 'breakfast'
-            loadedPlanData[i][mealTypeKey] =
-                List<String>.from(data[mealTypeKey.toLowerCase()] ?? []);
+            final mealData = data[mealTypeKey.toLowerCase()];
+            if (mealData != null) {
+              loadedPlanData[i][mealTypeKey] = List<String>.from(mealData);
+            }
           }
         }
       }
+
+      print("Loaded weekly plan data: $loadedPlanData"); // Debug print
     } catch (e) {
       print("Error loading weekly plan: $e");
-      // Optionally show a snackbar or error message to the user
+      // Show error to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading meal plan: $e')),
+        );
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
 
     if (mounted) {
@@ -109,9 +119,12 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
   }
 
   Future<void> _saveDayPlan(int dayIndex) async {
-    if (currentUserReference == null) return;
+    if (currentUserUid.isEmpty) {
+      print("Cannot save: User not authenticated");
+      return;
+    }
 
-    final DateTime startDate = FFAppState().todaysDate ?? DateTime.now();
+    final DateTime startDate = todaysDate ?? DateTime.now();
     final dayDate = startDate.add(Duration(days: dayIndex));
     final dateString = DateFormat('yyyy-MM-dd').format(dayDate);
 
@@ -122,8 +135,9 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
         .doc(dateString);
 
     Map<String, dynamic> dataToSave = {
-      'date': Timestamp.fromDate(dayDate), // Store the actual date for querying
+      'date': Timestamp.fromDate(dayDate),
     };
+
     for (String mealTypeKey in mealTypes) {
       dataToSave[mealTypeKey.toLowerCase()] =
           selectedMeals[dayIndex][mealTypeKey];
@@ -131,15 +145,12 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
 
     try {
       await planDocRef.set(dataToSave, SetOptions(merge: true));
-      // Optionally show a success message, though it might be too frequent
-      // print('Plan for $dateString saved.');
+      print('Plan for $dateString saved successfully.');
     } catch (e) {
       print("Error saving plan for $dateString: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content:
-                  Text('Error saving plan for $dateString. Please try again.')),
+          SnackBar(content: Text('Error saving plan: $e')),
         );
       }
     }
@@ -152,7 +163,7 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
   }
 
   Widget buildMealColumn(int dayIndex, String mealTypeName) {
-    final items = selectedMeals[dayIndex][mealTypeName]!;
+    final items = selectedMeals[dayIndex][mealTypeName] ?? [];
 
     return Padding(
       padding: const EdgeInsetsDirectional.fromSTEB(5.0, 0.0, 5.0, 0.0),
@@ -163,20 +174,16 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
           borderRadius: BorderRadius.circular(10.0),
         ),
         child: ConstrainedBox(
-          // Ensures minimum width for better tap targets if empty
-          constraints: const BoxConstraints(
-              minWidth: 120.0, minHeight: 100.0), // Adjusted minWidth
+          constraints: const BoxConstraints(minWidth: 120.0, minHeight: 100.0),
           child: Container(
-            padding: const EdgeInsets.all(8.0), // Increased padding
+            padding: const EdgeInsets.all(8.0),
             decoration: BoxDecoration(
               color: FlutterFlowTheme.of(context).primaryBackground,
               borderRadius: BorderRadius.circular(10.0),
             ),
             child: Column(
-              mainAxisSize:
-                  MainAxisSize.min, // So column doesn't expand unnecessarily
-              crossAxisAlignment:
-                  CrossAxisAlignment.stretch, // Stretch children horizontally
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   mealTypeName,
@@ -185,92 +192,95 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
                         fontFamily:
                             GoogleFonts.inter(fontWeight: FontWeight.w600)
                                 .fontFamily,
-                        fontSize: 16.0, // Slightly smaller for better fit
+                        fontSize: 16.0,
                         letterSpacing: 0.0,
                       ),
                 ),
                 const SizedBox(height: 8.0),
                 if (items.isNotEmpty)
-                  Expanded(
-                    // Allow list to take available space and scroll if needed
-                    child: ListView.builder(
-                      // Use ListView for scrollability if many items
-                      shrinkWrap:
-                          true, // Important if inside another scroll view or Expanded
-                      itemCount: items.length,
-                      itemBuilder: (context, itemIndex) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2.0),
-                          child: Text(
-                            '• ${items[itemIndex]}', // Added bullet point
-                            style:
-                                FlutterFlowTheme.of(context).bodySmall.override(
-                                      fontSize: 14.0, // Slightly smaller
-                                      fontFamily: FlutterFlowTheme.of(context)
-                                          .bodySmallFamily,
-                                    ),
-                          ),
-                        );
-                      },
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: items.map((itemText) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2.0),
+                        child: Text(
+                          '$itemText',
+                          style:
+                              FlutterFlowTheme.of(context).bodySmall.override(
+                                    fontSize: 14.0,
+                                    fontFamily: FlutterFlowTheme.of(context)
+                                        .bodySmallFamily,
+                                  ),
+                        ),
+                      );
+                    }).toList(),
                   )
                 else
-                  Expanded(
-                      child: Center(
-                          child: Text("No items",
-                              style: FlutterFlowTheme.of(context)
-                                  .bodySmall))), // Placeholder
-
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Text(
+                      "No items",
+                      textAlign: TextAlign
+                          .center, // Center the text without expanding the container
+                      style: FlutterFlowTheme.of(context).bodySmall,
+                    ),
+                  ),
                 const SizedBox(height: 8.0),
                 InkWell(
                   onTap: () async {
                     final result = await showModalBottomSheet<List<String>>(
                       isScrollControlled: true,
                       backgroundColor: Colors.transparent,
-                      enableDrag:
-                          false, // Usually false for full screen type modals
+                      enableDrag: false,
                       context: context,
                       builder: (context) {
                         return Padding(
-                          // Padding for keyboard
                           padding: MediaQuery.viewInsetsOf(context),
                           child: SearchPopUpWidget(
-                            initiallySelectedMealNames: selectedMeals[dayIndex]
-                                [mealTypeName],
+                            initiallySelectedMealNames:
+                                selectedMeals[dayIndex][mealTypeName] ?? [],
                           ),
                         );
                       },
                     );
 
                     if (result != null && mounted) {
-                      // Check mounted before setState
                       setState(() {
                         selectedMeals[dayIndex][mealTypeName] = result;
                       });
-                      await _saveDayPlan(
-                          dayIndex); // Save the updated plan for this day
+                      // ✅ Correctly handles potential errors
+                      try {
+                        await _saveDayPlan(dayIndex);
+                      } catch (e) {
+                        print("Failed to save day plan: $e");
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                                content: Text('Error: Could not save plan.')),
+                          );
+                        }
+                      }
                     }
                   },
                   child: Material(
-                    // Added Material for elevation and consistent look
                     color: Colors.transparent,
                     elevation: 1.0,
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(5.0), // Smaller radius
+                      borderRadius: BorderRadius.circular(5.0),
                     ),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 6.0), // Adjusted padding
+                      padding: const EdgeInsets.symmetric(vertical: 6.0),
                       decoration: BoxDecoration(
-                          color:
-                              FlutterFlowTheme.of(context).secondaryBackground,
-                          borderRadius: BorderRadius.circular(5.0),
-                          border: Border.all(
-                              color: FlutterFlowTheme.of(context).alternate,
-                              width: 1)),
+                        color: FlutterFlowTheme.of(context).secondaryBackground,
+                        borderRadius: BorderRadius.circular(5.0),
+                        border: Border.all(
+                          color: FlutterFlowTheme.of(context).alternate,
+                          width: 1,
+                        ),
+                      ),
                       child: Row(
-                        mainAxisSize: MainAxisSize.max,
+                        mainAxisSize: MainAxisSize.min,
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const Padding(
@@ -286,7 +296,7 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
                                   fontFamily: GoogleFonts.inter(
                                           fontWeight: FontWeight.w500)
                                       .fontFamily,
-                                  fontSize: 14.0, // Slightly smaller
+                                  fontSize: 14.0,
                                 ),
                           ),
                         ],
@@ -304,10 +314,14 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
 
   @override
   Widget build(BuildContext context) {
-    // FFAppState().todaysDate should be initialized in initState or by a previous page.
-    // We read it here for building the UI.
-    final DateTime plannerStartDate = FFAppState().todaysDate ?? DateTime.now();
-    context.watch<FFAppState>(); // Watch for potential changes if needed
+    final DateTime plannerStartDate = todaysDate ?? DateTime.now();
+
+    // Safely watch FFAppState if it exists
+    try {
+      context.watch<FFAppState>();
+    } catch (e) {
+      print("FFAppState not available: $e");
+    }
 
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
@@ -316,8 +330,7 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
         appBar: AppBar(
           backgroundColor: FlutterFlowTheme.of(context).primary,
-          automaticallyImplyLeading:
-              false, // Consider adding a back button or profile button
+          automaticallyImplyLeading: false,
           title: Text(
             'Meal Calendar',
             style: FlutterFlowTheme.of(context).headlineMedium.override(
@@ -329,15 +342,19 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
                 ),
           ),
           actions: [
-            // Example: Add a profile button
             IconButton(
               icon: const Icon(Icons.person, color: Colors.white),
               onPressed: () {
-                context.pushNamed(ProfilePgWidget.routeName);
+                // Handle profile navigation
+                try {
+                  context.pushNamed('ProfilePg'); // Simplified route name
+                } catch (e) {
+                  print("Navigation error: $e");
+                }
               },
             )
           ],
-          centerTitle: false, // Usually false if you have leading/actions
+          centerTitle: false,
           elevation: 2.0,
         ),
         body: SafeArea(
@@ -345,11 +362,12 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
           child: _isLoading
               ? Center(
                   child: CircularProgressIndicator(
-                      color: FlutterFlowTheme.of(context).primary))
+                    color: FlutterFlowTheme.of(context).primary,
+                  ),
+                )
               : SingleChildScrollView(
-                  // Main vertical scroll for days
                   child: Column(
-                    mainAxisSize: MainAxisSize.max,
+                    mainAxisSize: MainAxisSize.min,
                     children: List.generate(7, (dayIndex) {
                       final dayDate =
                           plannerStartDate.add(Duration(days: dayIndex));
@@ -364,26 +382,22 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
                           ),
                           child: Container(
                             decoration: BoxDecoration(
-                              color: Colors.white, // Day card background
+                              color: Colors.white,
                               borderRadius: BorderRadius.circular(10.0),
                             ),
                             child: Padding(
                               padding: const EdgeInsetsDirectional.fromSTEB(
-                                  8.0, 8.0, 8.0, 12.0), // Adjusted padding
+                                  8.0, 8.0, 8.0, 12.0),
                               child: Column(
-                                mainAxisSize: MainAxisSize.max,
+                                mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Padding(
                                     padding:
                                         const EdgeInsetsDirectional.fromSTEB(
-                                            4.0,
-                                            4.0,
-                                            0.0,
-                                            8.0), // Adjusted padding
+                                            4.0, 4.0, 0.0, 8.0),
                                     child: Text(
-                                      DateFormat("EEEE, MMM d").format(
-                                          dayDate), // More readable date format
+                                      DateFormat("EEEE, MMM d").format(dayDate),
                                       style: FlutterFlowTheme.of(context)
                                           .titleMedium
                                           .override(
@@ -395,12 +409,11 @@ class _WeeklyPlannerPgWidgetState extends State<WeeklyPlannerPgWidget> {
                                     ),
                                   ),
                                   SingleChildScrollView(
-                                    // Horizontal scroll for meal types within a day
                                     scrollDirection: Axis.horizontal,
                                     child: Row(
                                       mainAxisSize: MainAxisSize.max,
-                                      crossAxisAlignment: CrossAxisAlignment
-                                          .start, // Align cards to top
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: mealTypes
                                           .map((meal) =>
                                               buildMealColumn(dayIndex, meal))

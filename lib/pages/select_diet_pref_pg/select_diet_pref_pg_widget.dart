@@ -54,7 +54,7 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
           if (!mounted) return;
 
           // Helper function to safely convert a field to a List<String>
-          List<String> _safelyCastToList(dynamic fieldData) {
+          List<String> safelyCastToList(dynamic fieldData) {
             if (fieldData == null) return [];
             if (fieldData is List) {
               return List<String>.from(
@@ -75,12 +75,12 @@ class _SelectDietPrefPgWidgetState extends State<SelectDietPrefPgWidget> {
 
             // Use the new safe casting function for all list fields
             final List<String> categoryList =
-                _safelyCastToList(data['category']);
-            final List<String> dietList = _safelyCastToList(data['dietType']);
-            final List<String> tagsList = _safelyCastToList(data['tags']);
-            final List<String> relatedList = _safelyCastToList(data['related']);
+                safelyCastToList(data['category']);
+            final List<String> dietList = safelyCastToList(data['dietType']);
+            final List<String> tagsList = safelyCastToList(data['tags']);
+            final List<String> relatedList = safelyCastToList(data['related']);
             final List<String> foodTypeList =
-                _safelyCastToList(data['foodType']);
+                safelyCastToList(data['foodType']);
 
             final newMealDocRef =
                 currentUserReference!.collection('myMeals').doc();
