@@ -78,8 +78,9 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
       vsync: this,
       length: _categories.length,
       initialIndex: initialIndex > -1 ? initialIndex : 0,
-    )..addListener(() => setStateIfMounted());
+    );
     _model.tabBarController = _tabController;
+    _tabController.addListener(_handleTabSelection);
 
     animationsMap.addAll({
       'containerOnPageLoadAnimation2': AnimationInfo(
@@ -111,6 +112,13 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
   void setStateIfMounted() {
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  void _handleTabSelection() {
+    if (_tabController.indexIsChanging) {
+      _model.textFieldFocusNode?.unfocus();
+      setStateIfMounted();
     }
   }
 
@@ -175,6 +183,7 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
 
   @override
   void dispose() {
+    _tabController.removeListener(_handleTabSelection);
     _tabController.dispose();
     _model.maybeDispose();
     for (var catKey in _textControllers.keys) {
@@ -218,19 +227,81 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
     final bool isSelectedInPopup = _selectedByCategory[currentTabCategory]
             ?.contains(mealRecord.mealName) ??
         false;
+
     return Padding(
       padding: const EdgeInsetsDirectional.fromSTEB(5.0, 5.0, 5.0, 5.0),
       child: InkWell(
-        onTap: () {
-          if (mounted) {
+        onTap: () async {
+          // Make the function async
+          if (!mounted) return;
+
+          // This check correctly determines if the meal is selected anywhere in the popup
+          final bool isSelectedInPopup = _selectedByCategory.values
+              .expand((list) => list)
+              .contains(mealRecord.mealName);
+
+          if (isSelectedInPopup) {
+            // This part is for un-selecting, which works globally.
             setState(() {
-              if (isSelectedInPopup) {
-                _unselectMeal(mealRecord.mealName);
-              } else {
-                _selectedByCategory[currentTabCategory]
-                    ?.add(mealRecord.mealName);
-              }
+              _unselectMeal(mealRecord.mealName);
             });
+          } else {
+            // This part is for selecting a meal.
+
+            // 1. Determine the REAL destination for this meal.
+            // In 'singleSlot' mode, it's always the category we started with (e.g., 'Lunch').
+            // In 'fullDay' mode, it's the category of the tab we're currently on.
+            final String destinationCategory = widget.mode == 'singleSlot'
+                ? widget.activeCategory!
+                : currentTabCategory;
+
+            // 2. Optimistically update the UI for instant feedback.
+            setState(() {
+              // Add the meal to the correct category list in our local state.
+              _selectedByCategory[destinationCategory]
+                  ?.add(mealRecord.mealName);
+            });
+
+            // 3. Prepare and perform the database update asynchronously.
+            final mealCategories = mealRecord.category?.toList() ?? [];
+            bool needsDbUpdate = false;
+            Map<String, dynamic> updates = {};
+
+            // Check if the DESTINATION category needs to be added to the meal's data.
+            if (!mealCategories.contains(destinationCategory)) {
+              mealCategories.add(destinationCategory);
+              updates['category'] = mealCategories.toSet().toList();
+              needsDbUpdate = true;
+            }
+
+            // Also check if it needs to be promoted to a "usual" meal.
+            if (!mealRecord.isSelected) {
+              updates['isSelected'] = true;
+              needsDbUpdate = true;
+            }
+
+            // 4. If any updates are needed, send them to Firestore.
+            if (needsDbUpdate) {
+              try {
+                print(
+                    'Attempting to update ${mealRecord.mealName} with: $updates');
+                await mealRecord.reference.update(updates);
+                print('Update successful for ${mealRecord.mealName}');
+              } catch (e) {
+                print('!!! ERROR updating meal: $e');
+                // If the database update fails, revert the UI change.
+                setState(() {
+                  _unselectMeal(mealRecord.mealName);
+                });
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content:
+                            Text('Could not update meal. Please try again.')),
+                  );
+                }
+              }
+            }
           }
         },
         child: Material(
@@ -367,35 +438,50 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
               onTap: () async {
                 final newMealName = controller.text.trim();
                 if (newMealName.isEmpty) return;
-                final duplicate = allUserMealsForDuplicationCheck.any((meal) =>
-                    meal.mealName.toLowerCase() == newMealName.toLowerCase() &&
-                    meal.category.contains(tabCategoryName));
-                if (duplicate) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(
-                          '$newMealName already exists in $tabCategoryName.'),
-                      backgroundColor: FlutterFlowTheme.of(context).error));
-                  return;
+
+                // Normalize for case-insensitive lookup
+                final newMealLower = newMealName.toLowerCase();
+
+                // 1. Query by lowercase name
+                final querySnapshot = await currentUserReference!
+                    .collection('myMeals')
+                    .where('mealNameLower', isEqualTo: newMealLower)
+                    .get();
+
+                if (querySnapshot.docs.isNotEmpty) {
+                  // 2a. Found → update existing doc
+                  final docRef = querySnapshot.docs.first.reference;
+                  await docRef.update({
+                    'category': FieldValue.arrayUnion([tabCategoryName]),
+                    'isSelected': true,
+                  });
+                } else {
+                  // 2b. Not found → create new doc
+                  // Determine diet choice
+                  String chosenDiet = (dietOptions.length == 1)
+                      ? dietOptions.first
+                      : getDietChoice(tabCategoryName, foodTypeName);
+                  if (chosenDiet.isEmpty && dietOptions.isNotEmpty) {
+                    chosenDiet = dietOptions.first;
+                  }
+
+                  final newDoc =
+                      currentUserReference!.collection('myMeals').doc();
+                  await newDoc.set({
+                    'mealName': newMealName,
+                    'mealNameLower': newMealLower, // ← new field
+                    'category': [tabCategoryName],
+                    'foodType': [foodTypeName],
+                    'dietType':
+                        chosenDiet.isNotEmpty ? [chosenDiet] : <String>[],
+                    'isSelected': true,
+                    'createdBy': 'user',
+                    'tags': <String>[],
+                    'related': <String>[],
+                  });
                 }
-                String chosenDietForNewMeal = (dietOptions.length == 1)
-                    ? dietOptions.first
-                    : getDietChoice(tabCategoryName, foodTypeName);
-                if (chosenDietForNewMeal.isEmpty && dietOptions.isNotEmpty)
-                  chosenDietForNewMeal = dietOptions.first;
-                final newMealRef =
-                    currentUserReference!.collection('myMeals').doc();
-                await newMealRef.set(createMyMealsRecordData(
-                  mealName: newMealName,
-                  category: [tabCategoryName],
-                  foodType: [foodTypeName],
-                  dietType: chosenDietForNewMeal.isNotEmpty
-                      ? [chosenDietForNewMeal]
-                      : [],
-                  isSelected: true,
-                  createdBy: 'user',
-                  tags: [],
-                  related: [],
-                ));
+
+                // 3. UI cleanup
                 controller.clear();
                 setAdding(tabCategoryName, foodTypeName, false);
                 if (mounted) {
@@ -408,8 +494,9 @@ class _SearchPopUpWidgetState extends State<SearchPopUpWidget>
                 height: 48,
                 padding: const EdgeInsets.symmetric(horizontal: 12.0),
                 decoration: BoxDecoration(
-                    color: FlutterFlowTheme.of(context).primary,
-                    borderRadius: BorderRadius.circular(8.0)),
+                  color: FlutterFlowTheme.of(context).primary,
+                  borderRadius: BorderRadius.circular(8.0),
+                ),
                 child: const Icon(Icons.arrow_forward, color: Colors.white),
               ),
             ),

@@ -260,65 +260,6 @@ class _MealSelectionPgWidgetState extends State<MealSelectionPgWidget>
             Expanded(
               child: FFButtonWidget(
                 onPressed: () async {
-                  final allSelectedMeals = await queryMyMealsRecordOnce(
-                      parent: currentUserReference,
-                      queryBuilder: (q) =>
-                          q.where('isSelected', isEqualTo: true));
-                  final selectedNames =
-                      allSelectedMeals.map((rec) => rec.mealName).toList();
-                  final existingList = (await querySelectedMealsListRecordOnce(
-                          parent: currentUserReference, singleRecord: true))
-                      .firstOrNull;
-
-                  if (existingList != null) {
-                    await existingList.reference.update(
-                        createSelectedMealsListRecordData(
-                            mealsList: selectedNames));
-                  } else {
-                    final doc = SelectedMealsListRecord.createDoc(
-                        currentUserReference!);
-                    await doc.set(createSelectedMealsListRecordData(
-                        mealsList: selectedNames));
-                  }
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Selections Saved!')));
-                  }
-                },
-                text: 'Save',
-                options: FFButtonOptions(
-                    height: 48.0,
-                    color: FlutterFlowTheme.of(context).secondary,
-                    textStyle: FlutterFlowTheme.of(context)
-                        .titleSmall
-                        .override(color: Colors.white),
-                    borderRadius: BorderRadius.circular(8.0)),
-              ),
-            ),
-            const SizedBox(width: 8.0),
-            Expanded(
-              child: FFButtonWidget(
-                onPressed: () async {
-                  final allSelectedMeals = await queryMyMealsRecordOnce(
-                      parent: currentUserReference,
-                      queryBuilder: (q) =>
-                          q.where('isSelected', isEqualTo: true));
-                  final selectedNames =
-                      allSelectedMeals.map((rec) => rec.mealName).toList();
-                  final existingList = (await querySelectedMealsListRecordOnce(
-                          parent: currentUserReference, singleRecord: true))
-                      .firstOrNull;
-
-                  if (existingList != null) {
-                    await existingList.reference.update(
-                        createSelectedMealsListRecordData(
-                            mealsList: selectedNames));
-                  } else {
-                    final doc = SelectedMealsListRecord.createDoc(
-                        currentUserReference!);
-                    await doc.set(createSelectedMealsListRecordData(
-                        mealsList: selectedNames));
-                  }
                   if (mounted) {
                     context.pushNamed(WeeklyPlannerPgWidget.routeName);
                   }
